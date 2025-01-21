@@ -1,0 +1,327 @@
+-- Services
+local player = game.Players.LocalPlayer
+local camera = game.Workspace.CurrentCamera
+local userInputService = game:GetService("UserInputService")
+local runService = game:GetService("RunService")
+local coreGui = game:GetService("CoreGui")
+
+-- Create UI elements
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = coreGui -- Parent to CoreGui so it doesn't disappear
+
+-- Create the main frame that will hold everything and have the black border
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 80, 0, 375) -- Increased height for new button
+mainFrame.Position = UDim2.new(0.5, -40, 0, 50) -- Center the black box
+mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black color for the border
+mainFrame.BackgroundTransparency = 0.5
+mainFrame.BorderSizePixel = 2
+mainFrame.Parent = screenGui
+
+-- Create a corner for rounded edges (for main frame)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+-- Create the "Aqua Aimlock" text label
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(0, 80, 0, 40) -- Adjusted size for mobile
+titleLabel.Position = UDim2.new(0, 0, 0, 0)
+titleLabel.Text = "Aqua Aimlock"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)  -- White text color
+titleLabel.TextSize = 14 -- Adjust text size to fit the mobile box
+titleLabel.TextStrokeTransparency = 0.8
+titleLabel.BackgroundTransparency = 1
+titleLabel.Parent = mainFrame
+
+-- Create the input box for username (ensure it fits inside the black box)
+local inputBox = Instance.new("TextBox")
+inputBox.Size = UDim2.new(0, 60, 0, 30) -- Adjusted size for mobile (60x30)
+inputBox.Position = UDim2.new(0.5, -30, 0, 50) -- Position it inside the black box
+inputBox.PlaceholderText = "Enter Username"
+inputBox.Parent = mainFrame
+
+-- Create error label
+local errorLabel = Instance.new("TextLabel")
+errorLabel.Size = UDim2.new(0, 60, 0, 30) -- Adjusted size for mobile
+errorLabel.Position = UDim2.new(0.5, -30, 0, 90)
+errorLabel.Text = "Player not found"
+errorLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+errorLabel.BackgroundTransparency = 1
+errorLabel.Visible = false
+errorLabel.Parent = mainFrame
+
+-- Helper function to create a glowing button with dynamic text sizing and rounded corners
+local function createGlowingButton(text, position)
+    local button = Instance.new("TextButton")
+    button.Text = text
+    button.Position = position
+    button.BackgroundColor3 = Color3.fromRGB(211, 211, 211) -- Light gray color
+    button.TextColor3 = Color3.fromRGB(0, 0, 0) -- Black text
+    button.TextSize = 10 -- Adjust text size to fit mobile
+    button.TextStrokeTransparency = 0.8
+    button.Size = UDim2.new(0, math.max(60, button.TextBounds.X + 10), 0, 30) -- Adjust width based on text length
+    button.Parent = mainFrame
+
+    -- Add rounded corners to button
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 8)
+    buttonCorner.Parent = button
+
+    -- Add glowing effect (UIStroke for glowing outline on hover)
+    local buttonStroke = Instance.new("UIStroke")
+    buttonStroke.Thickness = 2
+    buttonStroke.Color = Color3.fromRGB(255, 255, 255) -- White glow
+    buttonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    buttonStroke.Parent = button
+    buttonStroke.Enabled = false
+
+    -- Enable the glowing effect when hovering
+    button.MouseEnter:Connect(function()
+        buttonStroke.Enabled = true
+    end)
+    
+    -- Disable the glowing effect when mouse leaves
+    button.MouseLeave:Connect(function()
+        buttonStroke.Enabled = false
+    end)
+
+    -- Return the button for event connections
+    return button
+end
+
+-- Create the buttons using the helper function with the updated text
+local toggleOnButton = createGlowingButton("Lock Camera ON", UDim2.new(0.5, -30, 0, 120))
+local toggleOffButton = createGlowingButton("Lock Camera OFF", UDim2.new(0.5, -30, 0, 160))
+local aimlockNearestButton = createGlowingButton("Aimlock nearest", UDim2.new(0.5, -30, 0, 200))
+local tpTargetButton = createGlowingButton("TP Target", UDim2.new(0.5, -30, 0, 240))
+local tpForwardButton = createGlowingButton("TP Forward", UDim2.new(0.5, -30, 0, 280))
+
+-- Add the "Speed" button
+local speedButton = createGlowingButton("Speed", UDim2.new(0.5, -30, 0, 320))
+
+-- Draggable UI functionality (touch and mouse)
+local dragging = false
+local dragInput, mousePos, framePos
+
+-- Function to start dragging the frame
+local function startDrag(input)
+    dragging = true
+    dragInput = input
+    mousePos = userInputService:GetMouseLocation()
+    framePos = mainFrame.Position
+end
+
+-- Function to stop dragging the frame
+local function stopDrag(input)
+    if input == dragInput then
+        dragging = false
+    end
+end
+
+-- Function to update the frame's position while dragging
+local function updateDrag(input)
+    if dragging then
+        local delta = userInputService:GetMouseLocation() - mousePos
+        mainFrame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+    end
+end
+
+-- Listen for mouse and touch input for dragging
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        startDrag(input)
+    end
+end)
+
+userInputService.InputEnded:Connect(stopDrag)
+userInputService.InputChanged:Connect(updateDrag)
+
+-- Initialize camera lock state
+local isCameraLocked = false
+local lockedPlayer = nil
+local teleportTowardsTargetEnabled = false
+local teleportForwardEnabled = false
+
+-- Create a red rectangle to show around the camera lock target
+local redRectangle = Instance.new("Frame")
+redRectangle.Size = UDim2.new(0, 80, 0, 90) -- Red box size set to 80x90
+redRectangle.Position = UDim2.new(0.5, -40, 0.5, -45) -- Position the red box over the target
+redRectangle.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Red color
+redRectangle.BackgroundTransparency = 0.5
+redRectangle.BorderSizePixel = 2
+redRectangle.Visible = false -- Initially hidden
+redRectangle.Parent = screenGui
+
+-- Function to find the player based on partial username or display name match
+local function findPlayerByPartialName(usernamePart)
+    local matchedPlayers = {}
+    for _, plr in pairs(game.Players:GetPlayers()) do
+        -- Check if either the username or display name contains the usernamePart
+        if plr.Name:lower():find(usernamePart:lower()) or plr.DisplayName:lower():find(usernamePart:lower()) then
+            table.insert(matchedPlayers, plr)
+        end
+    end
+    return matchedPlayers
+end
+
+-- Function to lock camera on the specified player
+local function lockCameraOnPlayer(username)
+    local matchedPlayers = findPlayerByPartialName(username)
+
+    if #matchedPlayers == 0 then
+        -- Show error message if no player is found
+        errorLabel.Text = "Player not found"
+        errorLabel.Visible = true
+        wait(1) -- Error message lasts for 1 second
+        errorLabel.Visible = false
+    elseif #matchedPlayers == 1 then
+        -- If exactly one player is matched, lock the camera to that player
+        lockedPlayer = matchedPlayers[1]
+        isCameraLocked = true
+        -- Show the red rectangle over the target player
+        redRectangle.Visible = true
+    else
+        -- If multiple players match, show an error message
+        errorLabel.Text = "Multiple matches found"
+        errorLabel.Visible = true
+        wait(1) -- Error message lasts for 1 second
+        errorLabel.Visible = false
+    end
+end
+
+-- Function to teleport towards the target player
+local function teleportTowardsTarget()
+    if isCameraLocked and lockedPlayer then
+        local myCharacter = player.Character
+        local myHumanoidRootPart = myCharacter:WaitForChild("HumanoidRootPart")
+        local targetPosition = lockedPlayer.Character:WaitForChild("HumanoidRootPart").Position
+        local direction = (targetPosition - myHumanoidRootPart.Position).unit
+
+        -- Teleport the player towards the target
+        myHumanoidRootPart.CFrame = myHumanoidRootPart.CFrame + direction * 10 -- Teleport 10 studs towards the target
+    end
+end
+
+-- Function to find the nearest player to the user
+local function getNearestPlayer()
+    local nearestPlayer = nil
+    local shortestDistance = math.huge -- Start with a very large number
+
+    for _, plr in pairs(game.Players:GetPlayers()) do
+        if plr ~= player then
+            local distance = (player.Character:WaitForChild("HumanoidRootPart").Position - plr.Character:WaitForChild("HumanoidRootPart").Position).Magnitude
+            if distance < shortestDistance then
+                nearestPlayer = plr
+                shortestDistance = distance
+            end
+        end
+    end
+
+    return nearestPlayer
+end
+
+-- Function to update the camera and player orientation
+local function updateCamera()
+    if lockedPlayer and isCameraLocked then
+        -- Get the target player's position
+        local targetPos = lockedPlayer.Character:WaitForChild("HumanoidRootPart").Position
+        local myCharacter = player.Character
+        local myHumanoidRootPart = myCharacter:WaitForChild("HumanoidRootPart")
+
+        -- Update the player's orientation to face the target player
+        local directionToTarget = (targetPos - myHumanoidRootPart.Position).unit
+        myCharacter:SetPrimaryPartCFrame(CFrame.new(myHumanoidRootPart.Position, targetPos))
+
+        -- Set camera's position to follow the player but look at the target
+        camera.CameraSubject = myCharacter:WaitForChild("Humanoid")
+        camera.CameraType = Enum.CameraType.Custom
+
+        -- Keep the camera positioned behind the player but facing the target
+        local offset = Vector3.new(0, 5, 10) -- Offset the camera behind and slightly above
+        camera.CFrame = CFrame.new(myHumanoidRootPart.Position + offset, targetPos)
+
+        -- Dynamically adjust the red rectangle size based on distance
+        local distance = (targetPos - myHumanoidRootPart.Position).Magnitude
+        local newSize = math.max(0.1, 80 / distance) -- The closer the target, the bigger the rectangle
+        newSize = math.min(newSize, 1) -- Ensure the size does not exceed 1 (full size)
+        
+        redRectangle.Size = UDim2.new(0, 80 * newSize, 0, 90 * newSize) -- Scale the size proportionally
+    end
+end
+
+-- Function for teleporting the player forward every 4 seconds
+local function teleportForward()
+    if isCameraLocked and teleportForwardEnabled then
+        local myCharacter = player.Character
+        local myHumanoidRootPart = myCharacter:WaitForChild("HumanoidRootPart")
+        
+        -- Teleport the player 40 studs forward every 4 seconds
+        myHumanoidRootPart.CFrame = myHumanoidRootPart.CFrame + myHumanoidRootPart.CFrame.LookVector * 40
+    end
+end
+
+-- Button to toggle camera lock ON
+toggleOnButton.MouseButton1Click:Connect(function()
+    local username = inputBox.Text
+    if username ~= "" then
+        lockCameraOnPlayer(username)
+    else
+        errorLabel.Text = "Enter a username!"
+        errorLabel.Visible = true
+        wait(1) -- Error message lasts for 1 second
+        errorLabel.Visible = false
+    end
+end)
+
+-- Button to toggle camera lock OFF
+toggleOffButton.MouseButton1Click:Connect(function()
+    isCameraLocked = false
+    lockedPlayer = nil
+    redRectangle.Visible = false
+    -- Reset the camera to its default behavior
+    camera.CameraSubject = player.Character:WaitForChild("Humanoid")
+    camera.CameraType = Enum.CameraType.Custom
+end)
+
+-- Button to teleport towards the locked target
+tpTargetButton.MouseButton1Click:Connect(function()
+    teleportTowardsTarget()
+end)
+
+-- Button to lock onto the nearest player
+aimlockNearestButton.MouseButton1Click:Connect(function()
+    local nearestPlayer = getNearestPlayer()
+    if nearestPlayer then
+        lockedPlayer = nearestPlayer
+        isCameraLocked = true
+        -- Show the red rectangle over the target player
+        redRectangle.Visible = true
+    else
+        errorLabel.Text = "No players nearby"
+        errorLabel.Visible = true
+        wait(1) -- Error message lasts for 1 second
+        errorLabel.Visible = false
+    end
+end)
+
+-- Button to toggle teleport forward
+tpForwardButton.MouseButton1Click:Connect(function()
+    teleportForwardEnabled = not teleportForwardEnabled
+end)
+
+-- Button to set player speed to 100
+speedButton.MouseButton1Click:Connect(function()
+    local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = 100
+    end
+end)
+
+-- RunService loop to update the camera and perform other continuous actions
+runService.RenderStepped:Connect(function()
+    updateCamera()
+    if teleportForwardEnabled then
+        teleportForward()
+    end
+end)
